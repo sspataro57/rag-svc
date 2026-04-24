@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>rag-svc supersearch — options</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #0f172a;
+        background: #f8fafc;
+      }
+      main {
+        max-width: 560px;
+        margin: 40px auto;
+        padding: 32px;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      }
+      h1 { font-size: 20px; margin-top: 0; }
+      p { color: #475569; line-height: 1.5; }
+      label { display: block; font-weight: 600; margin: 18px 0 6px; }
+      input[type="url"] {
+        width: 100%;
+        padding: 10px 12px;
+        font-size: 14px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        box-sizing: border-box;
+      }
+      .row { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+      button {
+        background: #0f766e; color: white; border: 0;
+        padding: 9px 16px; font-size: 14px; border-radius: 6px;
+        cursor: pointer;
+      }
+      button:hover { background: #115e59; }
+      .saved { color: #0f766e; font-size: 13px; }
+      .kv {
+        margin-top: 24px; padding: 14px;
+        background: #f1f5f9; border-radius: 8px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px; color: #334155;
+      }
+      .kv code { display: block; word-break: break-all; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>rag-svc supersearch</h1>
+      <p>
+        Point this extension at the rag-svc backend you want to search.
+        For Treetop that's <code>https://rag.treetopllc.com</code>; for
+        local dev, <code>http://localhost:8080</code>.
+      </p>
+
+      <label for="backendUrl">Backend URL</label>
+      <input id="backendUrl" type="url" placeholder="https://rag.treetopllc.com" />
+
+      <div class="row">
+        <button id="save">Save</button>
+        <span id="status" class="saved"></span>
+      </div>
+
+      <div class="kv">
+        <div>Extension origin (add to rag-svc's <code>EXTENSION_ID</code>):</div>
+        <code id="extId">…</code>
+      </div>
+    </main>
+    <script type="module" src="../src/options/options.ts"></script>
+  </body>
+</html>

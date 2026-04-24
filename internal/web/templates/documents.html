@@ -1,0 +1,50 @@
+{{define "documents"}}
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <span class="brand">rag-svc</span>
+      <a class="new" href="/chat?new=1">New chat</a>
+    </div>
+    <nav class="conv-list">
+      <a class="conv" href="/chat">Back to chat</a>
+    </nav>
+    <div class="sidebar-foot">
+      <span class="user">{{.UserEmail}}</span>
+      <form method="POST" action="/logout"><button>Sign out</button></form>
+    </div>
+  </aside>
+
+  <main class="chat">
+    <h2>Documents</h2>
+    <p class="hint">Drag a file onto the zone, or click to pick one. 50MB limit; markdown / text / HTML / PDF accepted.</p>
+
+    <form id="upload-form" class="drop-zone" enctype="multipart/form-data"
+          hx-post="/upload" hx-encoding="multipart/form-data"
+          hx-target="#upload-status" hx-swap="innerHTML">
+      <input type="file" name="file" id="file-input"
+             accept=".md,.markdown,.txt,.html,.htm,.pdf,text/markdown,text/plain,text/html,application/pdf" />
+      <label for="file-input">Drop a file here or click to browse</label>
+      <button type="submit">Upload</button>
+    </form>
+    <div id="upload-status"></div>
+
+    <h3>Indexed documents</h3>
+    <table class="docs">
+      <thead><tr><th>Title</th><th>Extraction</th><th>Size</th><th>Uploaded</th><th></th></tr></thead>
+      <tbody>
+      {{range .Documents}}
+        <tr>
+          <td><a href="{{.URL}}">{{.Title}}</a></td>
+          <td>{{.Extraction}}</td>
+          <td>{{.SizeHuman}}</td>
+          <td>{{.Relative}}</td>
+          <td><a href="{{.URL}}" download="{{.Filename}}">download</a></td>
+        </tr>
+      {{else}}
+        <tr><td colspan="5" class="empty">No documents uploaded yet.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </main>
+</div>
+{{end}}

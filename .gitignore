@@ -1,0 +1,7 @@
+/bin/
+/dist/
+.env
+*.log
+.DS_Store
+coverage.out
+coverage.html

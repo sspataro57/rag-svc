@@ -1,0 +1,17 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "paragraph",
+      "content": [
+        {"type": "text", "text": "Hey "},
+        {"type": "mention", "attrs": {"id": "5e13e14e4006ea0ea3285eb6", "text": "@Salvador"}},
+        {"type": "text", "text": " check "},
+        {"type": "inlineCard", "attrs": {"url": "https://example.com/runbook"}},
+        {"type": "text", "text": " "},
+        {"type": "emoji", "attrs": {"shortName": ":wave:", "text": "👋"}}
+      ]
+    }
+  ]
+}

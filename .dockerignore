@@ -1,0 +1,12 @@
+.git
+.github
+bin
+dist
+.env
+*.log
+.DS_Store
+coverage.out
+coverage.html
+deploy/compose
+README.md
+CLAUDE.md

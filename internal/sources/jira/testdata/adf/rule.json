@@ -1,0 +1,9 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {"type": "paragraph", "content": [{"type": "text", "text": "Before."}]},
+    {"type": "rule"},
+    {"type": "paragraph", "content": [{"type": "text", "text": "After."}]}
+  ]
+}

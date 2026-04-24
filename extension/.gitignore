@@ -1,0 +1,6 @@
+node_modules/
+dist/
+# The private key for the manifest `key` field stays on the author's
+# machine — unpacked installs don't need it, and the Web Store re-signs
+# anyway. Only the base64 public key in .manifest-key is committed-ready.
+key.pem

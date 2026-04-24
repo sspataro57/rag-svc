@@ -1,0 +1,45 @@
+{{define "chat"}}
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <span class="brand">rag-svc</span>
+      <a class="new" href="/chat?new=1">New chat</a>
+    </div>
+    <nav class="conv-list">
+      {{range .Conversations}}
+        <a class="conv {{if eq .ID.String $.ActiveConvID}}active{{end}}"
+           href="/chat?c={{.ID}}">
+          <span class="conv-title">{{if .Title}}{{.Title}}{{else}}Untitled{{end}}</span>
+          <span class="conv-time">{{.Relative}}</span>
+        </a>
+      {{else}}
+        <p class="empty">No conversations yet.</p>
+      {{end}}
+    </nav>
+    <div class="sidebar-foot">
+      <a href="/documents">Documents</a>
+      <span class="user">{{.UserEmail}}</span>
+      <form method="POST" action="/logout"><button>Sign out</button></form>
+    </div>
+  </aside>
+
+  <main class="chat">
+    <div id="messages" class="messages">
+      {{range .Messages}}
+        {{template "message" .}}
+      {{end}}
+    </div>
+
+    <form id="chat-form" class="composer"
+          hx-post="/chat/messages"
+          hx-target="#messages"
+          hx-swap="beforeend"
+          hx-on::after-request="this.query.value=''; this.query.focus();">
+      <input type="hidden" name="conversation_id" id="conversation-id-field" value="{{.ActiveConvID}}" />
+      <textarea name="query" rows="2" required autofocus
+                placeholder="Ask about Treetop's docs, tickets, or uploaded files..."></textarea>
+      <button type="submit">Send</button>
+    </form>
+  </main>
+</div>
+{{end}}

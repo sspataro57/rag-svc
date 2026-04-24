@@ -1,0 +1,22 @@
+{{define "message"}}
+<article class="msg msg-{{.Role}}">
+  <header class="msg-head">
+    <span class="role">{{if eq .Role "user"}}You{{else}}Assistant{{end}}</span>
+    <span class="time">{{.Relative}}</span>
+  </header>
+  <div class="msg-body">{{.HTML}}</div>
+  {{if .Citations}}
+    <details class="citations">
+      <summary>Sources ({{len .Citations}})</summary>
+      <ol>
+        {{range .Citations}}
+          <li>
+            <a href="{{.URL}}" target="_blank" rel="noopener">{{.Title}}</a>
+            <span class="src-meta">{{.Source}}{{if .ProjectOrSpace}} · {{.ProjectOrSpace}}{{end}} · score {{printf "%.2f" .Score}}</span>
+          </li>
+        {{end}}
+      </ol>
+    </details>
+  {{end}}
+</article>
+{{end}}

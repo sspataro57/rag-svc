@@ -1,0 +1,21 @@
+{
+  "name": "rag-svc-supersearch",
+  "version": "0.1.0",
+  "description": "Cmd-K supersearch overlay for rag-svc (Treetop Jira + Confluence + docs).",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.4.0",
+    "@types/chrome": "^0.0.268",
+    "jsdom": "^29.0.2",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11",
+    "vitest": "^1.6.0"
+  }
+}

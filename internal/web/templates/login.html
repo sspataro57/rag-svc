@@ -1,0 +1,19 @@
+{{define "login"}}
+<main class="auth-card">
+  <h1>rag-svc</h1>
+  <p>Treetop internal knowledge search + chat.</p>
+  {{if .Stub}}
+    <form method="GET" action="/dev/login" class="stack">
+      <label>
+        <span>Email</span>
+        <input type="email" name="email" required autocomplete="email"
+               placeholder="you@treetopllc.com" />
+      </label>
+      <button type="submit">Sign in (stub)</button>
+      <p class="hint">OIDC isn't configured — stub cookie flow enabled for dev.</p>
+    </form>
+  {{else}}
+    <a class="btn primary" href="/login?start=1">Sign in with Treetop SSO</a>
+  {{end}}
+</main>
+{{end}}

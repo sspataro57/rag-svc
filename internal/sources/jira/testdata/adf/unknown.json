@@ -1,0 +1,12 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "mysteryBlock",
+      "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "recovered text"}]}
+      ]
+    }
+  ]
+}
