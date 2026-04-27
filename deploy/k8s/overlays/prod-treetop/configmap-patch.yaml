@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-svc-config
+data:
+  # ---- per-instance Redis isolation ----
+  REDIS_DB: "0"
+  REDIS_KEY_PREFIX: "rag-treetop:"
+
+  # ---- Treetop Atlassian Cloud ----
+  JIRA_BASE_URL: "https://treetopllc.jira.com"
+  JIRA_EMAIL: "REPLACE_ME@treetopllc.com"
+  JIRA_PROJECTS: ""           # empty = all projects the service account can see
+  JIRA_POLL_INTERVAL: "5m"
+  JIRA_WORKERS: "4"
+
+  CONFLUENCE_BASE_URL: "https://treetopllc.jira.com/wiki"
+  CONFLUENCE_EMAIL: "REPLACE_ME@treetopllc.com"
+  CONFLUENCE_SPACES: ""       # empty = all spaces the service account can see
+  CONFLUENCE_POLL_INTERVAL: "10m"
+  CONFLUENCE_WORKERS: "4"

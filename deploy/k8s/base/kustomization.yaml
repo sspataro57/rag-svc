@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Base manifests for rag-svc. Overlays patch these per instance
+# (prod-treetop, prod-tes). The Secret is intentionally NOT listed here:
+# every overlay applies its own populated secret.yaml directly via
+# `kubectl apply` so credentials never get rendered through `kubectl
+# apply -k`. The base only ships secret.example.yaml as a template.
+resources:
+  - deployment.yaml
+  - service.yaml
+  - configmap.yaml
+
+commonLabels:
+  app.kubernetes.io/name: rag-svc
+  app.kubernetes.io/managed-by: kustomize

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-svc
+  labels:
+    app: rag-svc
+spec:
+  type: ClusterIP
+  selector:
+    app: rag-svc
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-svc-config
+data:
+  # ---- network / runtime ----
+  HTTP_ADDR: ":8080"
+  LOG_LEVEL: "info"
+
+  # ---- Postgres (overridden per overlay to point at rag_treetop / rag_tes) ----
+  # The overlay supplies DATABASE_URL via configmap-patch.
+
+  # ---- Redis (Valkey-Sentinel; per-overlay REDIS_DB + REDIS_KEY_PREFIX) ----
+  REDIS_MODE: "sentinel"
+  REDIS_SENTINELS: "valkey-sentinel.cnpg.svc.cluster.local:26379"
+  REDIS_MASTER_NAME: "mymaster"
+
+  # ---- LLM endpoints (split per project_llm_endpoints memory) ----
+  # Embeddings hit OpenAI proper (codex LAN endpoint has no /embeddings).
+  EMBED_BASE_URL: "https://api.openai.com/v1"
+  EMBED_MODEL: "text-embedding-3-small"
+  EMBED_BATCH_SIZE: "96"
+  # Chat completions hit the homelab LAN endpoint — codex models, free.
+  ANSWER_BASE_URL: "http://192.168.50.48/v1"
+  ANSWER_MODEL: "gpt-5.4"
+
+  # ---- search tuning (CLAUDE.md defaults) ----
+  SEARCH_VECTOR_WEIGHT: "0.6"
+  SEARCH_FTS_WEIGHT: "0.4"
+  SEARCH_RECENCY_DECAY_DAYS: "180"
+  SEARCH_QUERY_CACHE_TTL: "300s"
+  SEARCH_RATE_LIMIT_PER_USER: "30"

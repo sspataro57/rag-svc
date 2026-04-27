@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-svc
+  labels:
+    app: rag-svc
+spec:
+  # Single replica is the safe default. The retrieval path is stateless,
+  # but the ingest CronJobs and the in-memory ingest endpoint don't expect
+  # concurrent writers per source key. Scale up only when /search QPS
+  # forces it; revisit after observing real traffic.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: rag-svc
+  template:
+    metadata:
+      labels:
+        app: rag-svc
+    spec:
+      terminationGracePeriodSeconds: 30
+      # tiktoken-go downloads its BPE cache (cl100k_base) to /tmp on first
+      # call. With readOnlyRootFilesystem: true the rootfs is locked, so
+      # we mount an emptyDir at /tmp for both containers. Reset on pod
+      # restart — re-download is fast (~kB) and self-healing.
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      # Migrations run as an initContainer so the main container starts
+      # against a schema that matches the binary's expectations. golang-
+      # migrate is idempotent — re-running on every pod restart costs
+      # roughly one round-trip when the schema is already current.
+      initContainers:
+        - name: migrate
+          image: 192.168.50.20:5000/rag-svc:0.1.0
+          imagePullPolicy: IfNotPresent
+          command: ["rag-svc", "migrate"]
+          envFrom:
+            - configMapRef:
+                name: rag-svc-config
+            - secretRef:
+                name: rag-svc-secrets
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+      containers:
+        - name: rag-svc
+          image: 192.168.50.20:5000/rag-svc:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: rag-svc-config
+            - secretRef:
+                name: rag-svc-secrets
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              # Embedding batch encoding (tiktoken) and large ingest
+              # batches push memory; cap at 1Gi so a runaway batch is
+              # bounded without starving co-tenant pods.
+              cpu: 1000m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true

@@ -1,0 +1,2 @@
+# Populated secrets must never be committed.
+*/secret.yaml

@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: rag-treetop
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - cronjobs.yaml
+  - service-lan.yaml
+
+# Overlay-only ConfigMap patch. Kustomize merges these keys into the base
+# configmap rather than replacing it, so REDIS_DB / REDIS_KEY_PREFIX /
+# JIRA_* / CONFLUENCE_* keys layer on top of the base's defaults.
+patches:
+  - path: configmap-patch.yaml
+    target:
+      kind: ConfigMap
+      name: rag-svc-config
+
+# Pin the image tag here so a release is one edit, kustomize-built into
+# every workload (Deployment, init migrate, both CronJobs).
+images:
+  - name: 192.168.50.20:5000/rag-svc
+    newTag: "0.1.1"

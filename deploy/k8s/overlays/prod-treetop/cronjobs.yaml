@@ -1,0 +1,95 @@
+---
+# Periodic Jira sync. The cadence here is the floor — JIRA_POLL_INTERVAL
+# in the configmap is informational; CronJob frequency is what actually
+# triggers ingestion in k8s.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rag-svc-ingest-jira
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          # /tmp emptyDir for tiktoken-go BPE cache (rootfs is read-only).
+          volumes:
+            - name: tmp
+              emptyDir: {}
+          containers:
+            - name: ingest-jira
+              image: 192.168.50.20:5000/rag-svc:0.1.0
+              imagePullPolicy: IfNotPresent
+              command: ["rag-svc", "ingest", "jira"]
+              envFrom:
+                - configMapRef:
+                    name: rag-svc-config
+                - secretRef:
+                    name: rag-svc-secrets
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 10001
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rag-svc-ingest-confluence
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          # /tmp emptyDir for tiktoken-go BPE cache (rootfs is read-only).
+          volumes:
+            - name: tmp
+              emptyDir: {}
+          containers:
+            - name: ingest-confluence
+              image: 192.168.50.20:5000/rag-svc:0.1.0
+              imagePullPolicy: IfNotPresent
+              command: ["rag-svc", "ingest", "confluence"]
+              envFrom:
+                - configMapRef:
+                    name: rag-svc-config
+                - secretRef:
+                    name: rag-svc-secrets
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 10001
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
