@@ -138,11 +138,19 @@ func RunConfluence(ctx context.Context, deps ConfluenceDeps, opts ConfluenceOpti
 	}
 
 	if len(queued) == 0 {
-		if err := deps.Store.SetWatermark(ctx, sourceTypeConfluence, start, ""); err != nil {
-			return &ConfluenceResult{StartedAt: start, FinishedAt: time.Now().UTC()}, err
+		// Mirror the jira ingestor: don't advance the watermark on a
+		// zero-result run. If the v2 list endpoint ever returns empty
+		// for a space that does have recent updates, advancing here
+		// would skip them permanently.
+		if !watermark.IsZero() && start.Sub(watermark) > 6*time.Hour {
+			log.Warn("confluence ingest: no new pages but watermark is stale",
+				"watermark", watermark.Format(time.RFC3339),
+				"age", start.Sub(watermark).String(),
+			)
+		} else {
+			log.Info("confluence ingest: no new pages", "watermark", watermark.Format(time.RFC3339))
 		}
-		log.Info("confluence ingest: no new pages", "watermark", start.Format(time.RFC3339))
-		return &ConfluenceResult{StartedAt: start, FinishedAt: time.Now().UTC(), Watermark: start}, nil
+		return &ConfluenceResult{StartedAt: start, FinishedAt: time.Now().UTC(), Watermark: watermark}, nil
 	}
 
 	// --- Fetch bodies + ancestors in parallel ---

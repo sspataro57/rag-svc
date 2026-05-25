@@ -134,11 +134,22 @@ func RunJira(ctx context.Context, deps JiraDeps, opts JiraOptions) (*JiraResult,
 	}
 
 	if len(issues) == 0 {
+		// Do NOT advance the watermark on a zero-result run. Atlassian's
+		// /search/jql endpoint occasionally returns empty pages for
+		// recent updates; advancing here would silently skip past those
+		// updates forever (see incident 2026-05: 19-day gap between
+		// last indexed_at and the watermark). Leaving the watermark in
+		// place means the next run re-scans the same window, which is
+		// idempotent and self-healing once the API returns real data.
 		result.FinishedAt = time.Now().UTC()
-		if err := deps.Store.SetWatermark(ctx, sourceTypeJira, start, ""); err != nil {
-			return result, err
+		if !watermark.IsZero() && start.Sub(watermark) > 6*time.Hour {
+			log.Warn("jira ingest: no new issues but watermark is stale",
+				"watermark", watermark.Format(time.RFC3339),
+				"age", start.Sub(watermark).String(),
+			)
+		} else {
+			log.Info("jira ingest: no new issues", "watermark", watermark.Format(time.RFC3339))
 		}
-		log.Info("jira ingest: no new issues", "watermark", start.Format(time.RFC3339))
 		return result, nil
 	}
 
