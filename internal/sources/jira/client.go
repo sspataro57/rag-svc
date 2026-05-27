@@ -100,6 +100,56 @@ type IssueFields struct {
 	Creator     *UserRef       `json:"creator,omitempty"`
 	Reporter    *UserRef       `json:"reporter,omitempty"`
 	Assignee    *UserRef       `json:"assignee,omitempty"`
+
+	// Relationship fields used by source_links graph expansion. Atlassian
+	// Cloud unified epic-link with parent in 2023, so an Epic shows up as a
+	// regular parent whose IssueType is "Epic".
+	Parent     *ParentRef  `json:"parent,omitempty"`
+	Subtasks   []IssueRef  `json:"subtasks,omitempty"`
+	IssueLinks []IssueLink `json:"issuelinks,omitempty"`
+}
+
+// IssueRef is the minimal embedded-issue shape Jira uses in relationship
+// fields (parent, subtasks, issuelinks). The full issue is fetched separately
+// when needed.
+type IssueRef struct {
+	ID     string             `json:"id,omitempty"`
+	Key    string             `json:"key"`
+	Fields *IssueRefSubFields `json:"fields,omitempty"`
+}
+
+// IssueRefSubFields is the trimmed `fields` block embedded inside a parent /
+// subtask reference. Only IssueType is needed today — used to tag an Epic
+// parent with kind="epic" rather than the generic "parent".
+type IssueRefSubFields struct {
+	IssueType *IssueTypeInfo `json:"issuetype,omitempty"`
+}
+
+// ParentRef is the shape Jira uses for `fields.parent`. Same as IssueRef but
+// kept distinct in case Atlassian adds parent-specific fields later.
+type ParentRef = IssueRef
+
+// IssueLink represents one entry in `fields.issuelinks`. Each entry carries
+// either an outwardIssue or an inwardIssue (never both); the API uses two
+// separate entries when both directions are relevant.
+type IssueLink struct {
+	ID           string         `json:"id,omitempty"`
+	Type         *IssueLinkType `json:"type,omitempty"`
+	OutwardIssue *IssueRef      `json:"outwardIssue,omitempty"`
+	InwardIssue  *IssueRef      `json:"inwardIssue,omitempty"`
+}
+
+// IssueLinkType carries the human-readable verb phrases for both directions
+// of a link kind. The Treetop instance ships the default Atlassian types:
+// Blocks (outward="blocks", inward="is blocked by"), Relates ("relates to"
+// both ways), Duplicate ("duplicates" / "is duplicated by"), Cloners
+// ("clones" / "is cloned by"). Admins can add custom kinds — we canonicalize
+// whatever verb the API returns.
+type IssueLinkType struct {
+	ID      string `json:"id,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Inward  string `json:"inward,omitempty"`
+	Outward string `json:"outward,omitempty"`
 }
 
 type IssueStatus struct {

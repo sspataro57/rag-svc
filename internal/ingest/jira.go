@@ -106,8 +106,14 @@ func RunJira(ctx context.Context, deps JiraDeps, opts JiraOptions) (*JiraResult,
 			break
 		}
 		resp, err := deps.Client.SearchJQL(ctx, jira.SearchRequest{
-			JQL:           jql,
-			Fields:        []string{"summary", "description", "status", "issuetype", "project", "updated", "comment", "labels", "assignee"},
+			JQL: jql,
+			Fields: []string{
+				"summary", "description", "status", "issuetype", "project",
+				"updated", "comment", "labels", "assignee",
+				// Relationship fields populate source_links (see
+				// internal/sources/jira/normalize.go:extractLinks).
+				"parent", "subtasks", "issuelinks",
+			},
 			MaxResults:    opts.PageSize,
 			NextPageToken: nextToken,
 		})
@@ -281,6 +287,7 @@ func processIssue(ctx context.Context, deps JiraDeps, opts JiraOptions, iss jira
 type JiraIngestStats struct {
 	Chunks     int
 	Embeddings int
+	Links      int
 	UpdatedAt  time.Time
 }
 
@@ -337,9 +344,22 @@ func IngestJiraNormalized(ctx context.Context, deps JiraDeps, opts JiraOptions, 
 		return JiraIngestStats{}, err
 	}
 
+	linkRows := make([]store.LinkRow, 0, len(norm.Links))
+	for _, l := range norm.Links {
+		linkRows = append(linkRows, store.LinkRow{
+			TargetSourceType: l.TargetType,
+			TargetSourceKey:  l.TargetKey,
+			Kind:             l.Kind,
+		})
+	}
+	if err := deps.Store.ReplaceSourceLinks(ctx, sourceID, linkRows); err != nil {
+		return JiraIngestStats{}, err
+	}
+
 	return JiraIngestStats{
 		Chunks:     len(rows),
 		Embeddings: len(rows),
+		Links:      len(linkRows),
 		UpdatedAt:  norm.UpdatedAt,
 	}, nil
 }

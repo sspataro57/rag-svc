@@ -20,6 +20,7 @@ type NormalizedIssue struct {
 	URL         string
 	UpdatedAt   time.Time
 	Extra       map[string]any
+	Links       []NormalizedLink
 }
 
 type NormalizedComment struct {
@@ -27,6 +28,17 @@ type NormalizedComment struct {
 	Author    string
 	CreatedAt time.Time
 	Body      string // ADF rendered to markdown
+}
+
+// NormalizedLink is one outgoing edge from this issue. TargetType is "jira"
+// for issue-to-issue links today; the field is forward-compatible with
+// confluence/document targets. Kind is the canonicalized verb (lowercased,
+// spaces → underscores): "parent", "epic", "subtask", "blocks",
+// "is_blocked_by", "relates_to", "duplicates", "is_duplicated_by", etc.
+type NormalizedLink struct {
+	TargetType string
+	TargetKey  string
+	Kind       string
 }
 
 // BodyMarkdown returns the fully-assembled markdown stored in sources.body_markdown:
@@ -136,6 +148,8 @@ func Normalize(issue *Issue, issuesBaseURL string) (*NormalizedIssue, error) {
 		extra["assignee"] = issue.Fields.Assignee.DisplayName
 	}
 
+	links := extractLinks(issue)
+
 	return &NormalizedIssue{
 		Key:         issue.Key,
 		Title:       issue.Fields.Summary,
@@ -147,7 +161,76 @@ func Normalize(issue *Issue, issuesBaseURL string) (*NormalizedIssue, error) {
 		URL:         url,
 		UpdatedAt:   updated,
 		Extra:       extra,
+		Links:       links,
 	}, nil
+}
+
+// extractLinks walks the relationship fields on a Jira issue and returns
+// the outgoing edges this issue contributes to the source_links graph.
+//
+//   - fields.parent             → (this, parent.key, "parent" | "epic")
+//   - fields.subtasks[]         → (this, subtask.key, "subtask")
+//   - fields.issuelinks[]       → outwardIssue ⇒ (this, outward.key, type.outward)
+//     inwardIssue  ⇒ (this, inward.key, type.inward)
+//
+// Self-loops, edges with empty keys/kinds, and exact duplicates are dropped.
+// Reverse edges (e.g. subtask → parent) are emitted by the *other* end when
+// that issue is ingested; we never speculate about reverse edges here.
+func extractLinks(issue *Issue) []NormalizedLink {
+	out := make([]NormalizedLink, 0, 4)
+	seen := make(map[string]struct{}, 4)
+	add := func(targetKey, kind string) {
+		targetKey = strings.TrimSpace(targetKey)
+		kind = canonicalLinkKind(kind)
+		if targetKey == "" || kind == "" || targetKey == issue.Key {
+			return
+		}
+		k := "jira\x00" + targetKey + "\x00" + kind
+		if _, ok := seen[k]; ok {
+			return
+		}
+		seen[k] = struct{}{}
+		out = append(out, NormalizedLink{
+			TargetType: "jira",
+			TargetKey:  targetKey,
+			Kind:       kind,
+		})
+	}
+
+	if p := issue.Fields.Parent; p != nil {
+		kind := "parent"
+		if p.Fields != nil && p.Fields.IssueType != nil &&
+			strings.EqualFold(p.Fields.IssueType.Name, "Epic") {
+			kind = "epic"
+		}
+		add(p.Key, kind)
+	}
+	for _, st := range issue.Fields.Subtasks {
+		add(st.Key, "subtask")
+	}
+	for _, l := range issue.Fields.IssueLinks {
+		if l.Type == nil {
+			continue
+		}
+		if l.OutwardIssue != nil {
+			add(l.OutwardIssue.Key, l.Type.Outward)
+		}
+		if l.InwardIssue != nil {
+			add(l.InwardIssue.Key, l.Type.Inward)
+		}
+	}
+	return out
+}
+
+// canonicalLinkKind lowercases and collapses whitespace runs to a single
+// underscore: "is blocked by" → "is_blocked_by", "Relates To" → "relates_to".
+// Empty input produces empty output (caller skips).
+func canonicalLinkKind(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(s), "_")
 }
 
 // Jira returns timestamps in ISO 8601 with a numeric offset, e.g.

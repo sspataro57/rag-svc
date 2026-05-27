@@ -38,6 +38,11 @@ type ingestJiraIssue struct {
 	UpdatedAt   time.Time           `json:"updated_at"`
 	Comments    []ingestJiraComment `json:"comments,omitempty"`
 	Extra       map[string]any      `json:"extra,omitempty"`
+	// Links is the outgoing edge set for this issue. Producers without
+	// link data (e.g. the email-reconstructed feed) omit it. target_type
+	// defaults to "jira" when blank; kind is stored verbatim after a
+	// lowercase/underscore canonicalization.
+	Links []ingestJiraLink `json:"links,omitempty"`
 }
 
 type ingestJiraComment struct {
@@ -46,9 +51,16 @@ type ingestJiraComment struct {
 	Body      string    `json:"body"`
 }
 
+type ingestJiraLink struct {
+	TargetType string `json:"target_type,omitempty"`
+	TargetKey  string `json:"target_key"`
+	Kind       string `json:"kind"`
+}
+
 type ingestJiraResponse struct {
 	Upserted int               `json:"upserted"`
 	Chunks   int               `json:"chunks"`
+	Links    int               `json:"links"`
 	Failed   int               `json:"failed"`
 	Errors   []ingestJiraError `json:"errors,omitempty"`
 }
@@ -108,6 +120,7 @@ func (s *Server) handleIngestJira(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Upserted++
 		resp.Chunks += stats.Chunks
+		resp.Links += stats.Links
 	}
 
 	status := http.StatusOK
@@ -152,6 +165,19 @@ func buildNormalizedIssue(in ingestJiraIssue) (*jira.NormalizedIssue, error) {
 		})
 	}
 
+	links := make([]jira.NormalizedLink, 0, len(in.Links))
+	for _, l := range in.Links {
+		tt := strings.TrimSpace(l.TargetType)
+		if tt == "" {
+			tt = "jira"
+		}
+		links = append(links, jira.NormalizedLink{
+			TargetType: tt,
+			TargetKey:  strings.TrimSpace(l.TargetKey),
+			Kind:       strings.TrimSpace(l.Kind),
+		})
+	}
+
 	extra := in.Extra
 	if extra == nil {
 		extra = map[string]any{}
@@ -179,5 +205,6 @@ func buildNormalizedIssue(in ingestJiraIssue) (*jira.NormalizedIssue, error) {
 		URL:         in.URL,
 		UpdatedAt:   in.UpdatedAt,
 		Extra:       extra,
+		Links:       links,
 	}, nil
 }

@@ -87,6 +87,15 @@ type ChunkRow struct {
 	Embedding  []float32
 }
 
+// LinkRow is one outgoing edge for ReplaceSourceLinks. Targets are stored
+// by (type, key) rather than source_id so a link can point at a not-yet-
+// ingested source and light up automatically once that source arrives.
+type LinkRow struct {
+	TargetSourceType string
+	TargetSourceKey  string
+	Kind             string
+}
+
 // UpsertSource writes the source row by (source_type, source_key). On
 // conflict it updates everything except indexed_at, which defaults to now().
 // Returns the source's id.
@@ -159,6 +168,55 @@ VALUES ($1, $2, $3, $4, $5::vector, $6)`
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("store: commit chunks: %w", err)
+	}
+	return nil
+}
+
+// ReplaceSourceLinks atomically deletes existing outgoing edges for sourceID
+// and inserts the provided set. Mirrors ReplaceChunks: a re-ingest of the
+// source replaces its links wholesale, so a link removed in Jira disappears
+// here on the next sync. Self-loops and rows with empty target/kind are
+// dropped defensively; duplicate (target_type, target_key, kind) entries
+// within the input slice are de-duplicated.
+func (s *Store) ReplaceSourceLinks(ctx context.Context, sourceID int64, links []LinkRow) error {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("store: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `DELETE FROM source_links WHERE source_id = $1`, sourceID); err != nil {
+		return fmt.Errorf("store: delete source_links for %d: %w", sourceID, err)
+	}
+
+	if len(links) > 0 {
+		seen := make(map[string]struct{}, len(links))
+		const q = `
+INSERT INTO source_links (source_id, target_source_type, target_source_key, kind)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING`
+		for _, l := range links {
+			tt := strings.TrimSpace(l.TargetSourceType)
+			tk := strings.TrimSpace(l.TargetSourceKey)
+			kind := strings.TrimSpace(l.Kind)
+			if tt == "" || tk == "" || kind == "" {
+				continue
+			}
+			dedupKey := tt + "\x00" + tk + "\x00" + kind
+			if _, ok := seen[dedupKey]; ok {
+				continue
+			}
+			seen[dedupKey] = struct{}{}
+
+			if _, err := tx.Exec(ctx, q, sourceID, tt, tk, kind); err != nil {
+				return fmt.Errorf("store: insert source_link %s/%s (%s) for source %d: %w",
+					tt, tk, kind, sourceID, err)
+			}
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("store: commit source_links: %w", err)
 	}
 	return nil
 }
