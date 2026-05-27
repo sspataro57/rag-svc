@@ -6,6 +6,7 @@ package chunk
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/pkoukk/tiktoken-go"
 
@@ -77,7 +78,7 @@ func Jira(issue *jira.NormalizedIssue, opts JiraOptions) ([]Chunk, error) {
 	segments = append(segments, segment{text: head, kind: KindBody})
 
 	for _, c := range issue.Comments {
-		header := fmt.Sprintf("\n\n## Comment by %s on %s\n\n", c.Author, c.CreatedAt.UTC().Format("2006-01-02"))
+		header := commentHeader(c.Author, c.CreatedAt)
 		body := strings.TrimRight(c.Body, "\n")
 		segments = append(segments, segment{text: header + body, kind: KindComment})
 	}
@@ -156,6 +157,27 @@ func Jira(issue *jira.NormalizedIssue, opts JiraOptions) ([]Chunk, error) {
 	flush()
 
 	return out, nil
+}
+
+// commentHeader builds the chunk-level comment separator. Reconstructed
+// tickets often carry partial metadata: the author may be known (the
+// feeder attributes empty-author bodies to the configured default) while
+// the timestamp is missing, or both fields may be blank. Drop the missing
+// half rather than emitting "by  on 0001-01-01" garbage into the
+// embedding.
+func commentHeader(author string, createdAt time.Time) string {
+	hasAuthor := strings.TrimSpace(author) != ""
+	hasDate := !createdAt.IsZero()
+	switch {
+	case hasAuthor && hasDate:
+		return fmt.Sprintf("\n\n## Comment by %s on %s\n\n", author, createdAt.UTC().Format("2006-01-02"))
+	case hasAuthor:
+		return fmt.Sprintf("\n\n## Comment by %s\n\n", author)
+	case hasDate:
+		return fmt.Sprintf("\n\n## Comment on %s\n\n", createdAt.UTC().Format("2006-01-02"))
+	default:
+		return "\n\n## Comment\n\n"
+	}
 }
 
 // encoder returns the shared cl100k_base tokenizer. tiktoken-go caches the

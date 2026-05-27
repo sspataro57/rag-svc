@@ -83,7 +83,7 @@ func newServeCmd() *cobra.Command {
 			defer rdb.Close()
 
 			embedder := buildEmbedder(cfg, logger)
-			embedCache := cache.NewEmbedCache(rdb, cfg.Search.QueryCacheTTL, embed.Dim)
+			embedCache := cache.NewEmbedCache(rdb, cfg.Search.QueryCacheTTL, embed.Dim, cfg.Core.RedisKeyPrefix)
 			retrievalDeps := &retrieve.Deps{
 				Pool:             st.Pool(),
 				Embedder:         embedder,
@@ -149,7 +149,14 @@ func newServeCmd() *cobra.Command {
 			srv := raghttp.NewServer(cfg, st, rdb, logger).
 				WithRetrieval(retrievalDeps).
 				WithWeb(webHandler).
-				WithMCP(mcpSrv)
+				WithMCP(mcpSrv).
+				WithIngest(ingest.JiraDeps{
+					Embedder: embedder,
+					Store:    st,
+					Logger:   logger,
+				}, ingest.JiraOptions{
+					BatchSize: cfg.LLM.EmbedBatchSize,
+				})
 			if blobClient != nil {
 				srv = srv.WithBlob(blobClient)
 			}

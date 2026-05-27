@@ -23,7 +23,7 @@ func newTestClient(t *testing.T) (redis.UniversalClient, *miniredis.Miniredis) {
 
 func TestEmbedCache_SetGetRoundTrip(t *testing.T) {
 	client, _ := newTestClient(t)
-	c := NewEmbedCache(client, time.Minute, 4)
+	c := NewEmbedCache(client, time.Minute, 4, "")
 	v := []float32{0.1, -0.25, 1.5, -0.75}
 
 	if err := c.Set(context.Background(), "m1", "hello", v); err != nil {
@@ -48,7 +48,7 @@ func TestEmbedCache_SetGetRoundTrip(t *testing.T) {
 
 func TestEmbedCache_Miss(t *testing.T) {
 	client, _ := newTestClient(t)
-	c := NewEmbedCache(client, time.Minute, 4)
+	c := NewEmbedCache(client, time.Minute, 4, "")
 	_, ok, err := c.Get(context.Background(), "m", "never-set")
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestEmbedCache_Miss(t *testing.T) {
 
 func TestEmbedCache_DifferentModelsDifferentKeys(t *testing.T) {
 	client, _ := newTestClient(t)
-	c := NewEmbedCache(client, time.Minute, 4)
+	c := NewEmbedCache(client, time.Minute, 4, "")
 
 	if err := c.Set(context.Background(), "small", "query", []float32{1, 2, 3, 4}); err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestEmbedCache_DifferentModelsDifferentKeys(t *testing.T) {
 
 func TestEmbedCache_WrongDimensionEvicts(t *testing.T) {
 	client, mr := newTestClient(t)
-	c := NewEmbedCache(client, time.Minute, 4)
+	c := NewEmbedCache(client, time.Minute, 4, "")
 	// Seed with a 3-dim vector directly so we can provoke the dim mismatch.
 	if err := c.Set(context.Background(), "m", "q", []float32{1, 2, 3}); err != nil {
 		t.Fatal(err)

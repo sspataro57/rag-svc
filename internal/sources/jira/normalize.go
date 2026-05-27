@@ -33,6 +33,10 @@ type NormalizedComment struct {
 // description first, then each comment under a `## Comment by {author} on {date}`
 // header. This is the text the chunker splits; keeping it in one field means
 // `rag-svc reindex` can rebuild chunks without re-fetching Jira.
+//
+// When a comment has neither author nor timestamp (the reconstructed-from-email
+// case), a bare `## Comment` divider is emitted instead so the audit text
+// stays clean and matches what the chunker embeds.
 func (n *NormalizedIssue) BodyMarkdown() string {
 	var b strings.Builder
 	if n.Description != "" {
@@ -40,7 +44,18 @@ func (n *NormalizedIssue) BodyMarkdown() string {
 		b.WriteString("\n")
 	}
 	for _, c := range n.Comments {
-		fmt.Fprintf(&b, "\n\n## Comment by %s on %s\n\n", c.Author, c.CreatedAt.UTC().Format("2006-01-02"))
+		hasAuthor := strings.TrimSpace(c.Author) != ""
+		hasDate := !c.CreatedAt.IsZero()
+		switch {
+		case hasAuthor && hasDate:
+			fmt.Fprintf(&b, "\n\n## Comment by %s on %s\n\n", c.Author, c.CreatedAt.UTC().Format("2006-01-02"))
+		case hasAuthor:
+			fmt.Fprintf(&b, "\n\n## Comment by %s\n\n", c.Author)
+		case hasDate:
+			fmt.Fprintf(&b, "\n\n## Comment on %s\n\n", c.CreatedAt.UTC().Format("2006-01-02"))
+		default:
+			b.WriteString("\n\n## Comment\n\n")
+		}
 		b.WriteString(strings.TrimRight(c.Body, "\n"))
 		b.WriteString("\n")
 	}

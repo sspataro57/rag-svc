@@ -33,6 +33,17 @@ type Core struct {
 	RedisMasterName       string   `envconfig:"REDIS_MASTER_NAME" default:"mymaster"`
 	RedisPassword         string   `envconfig:"REDIS_PASSWORD"`
 	RedisSentinelPassword string   `envconfig:"REDIS_SENTINEL_PASSWORD"`
+	// RedisDB selects the logical database. Used to namespace caches
+	// across rag-svc instances that share one Valkey-Sentinel cluster
+	// (Treetop=0, TES=1, Personal=2 in our homelab). For the standalone
+	// path the URL's `/N` suffix is authoritative and this is ignored.
+	RedisDB int `envconfig:"REDIS_DB" default:"0"`
+	// RedisKeyPrefix is prepended to every key the service writes to
+	// Redis. Defense-in-depth on top of RedisDB: a stray FLUSHDB or a
+	// key collision when sharing one Valkey across instances becomes
+	// impossible. Compose leaves it blank; deploys set e.g.
+	// "rag-treetop:" so MONITOR / KEYS scans show ownership at a glance.
+	RedisKeyPrefix string `envconfig:"REDIS_KEY_PREFIX"`
 
 	BlobEndpoint  string `envconfig:"BLOB_ENDPOINT"`
 	BlobBucket    string `envconfig:"BLOB_BUCKET" default:"rag-svc"`

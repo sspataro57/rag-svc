@@ -36,6 +36,7 @@ func NewClient(ctx context.Context, cfg config.Core) (redis.UniversalClient, err
 			SentinelAddrs:    cfg.RedisSentinels,
 			Password:         cfg.RedisPassword,
 			SentinelPassword: cfg.RedisSentinelPassword,
+			DB:               cfg.RedisDB,
 		})
 	default:
 		return nil, fmt.Errorf("cache: unknown REDIS_MODE %q", cfg.RedisMode)

@@ -264,21 +264,50 @@ func processIssue(ctx context.Context, deps JiraDeps, opts JiraOptions, iss jira
 		return issueStats{}, err
 	}
 
-	chunks, err := chunk.Jira(norm, opts.ChunkOpts)
+	stats, err := IngestJiraNormalized(ctx, deps, opts, norm)
 	if err != nil {
 		return issueStats{}, err
+	}
+	return issueStats{
+		chunks:     stats.Chunks,
+		embeddings: stats.Embeddings,
+		updatedAt:  stats.UpdatedAt,
+	}, nil
+}
+
+// JiraIngestStats summarizes a single-issue upsert. Returned by
+// IngestJiraNormalized so non-package callers (e.g. the HTTP handler) can
+// report counts without reaching into the unexported worker stats.
+type JiraIngestStats struct {
+	Chunks     int
+	Embeddings int
+	UpdatedAt  time.Time
+}
+
+// IngestJiraNormalized chunks, embeds, and upserts a single NormalizedIssue.
+// Shared by the live-fetch worker and the POST /ingest/jira HTTP path so a
+// reconstructed-from-email feed produces the same row shape and chunk text as
+// a live API sync.
+func IngestJiraNormalized(ctx context.Context, deps JiraDeps, opts JiraOptions, norm *jira.NormalizedIssue) (JiraIngestStats, error) {
+	if norm == nil {
+		return JiraIngestStats{}, errors.New("ingest: nil normalized issue")
+	}
+	opts = opts.withDefaults()
+
+	chunks, err := chunk.Jira(norm, opts.ChunkOpts)
+	if err != nil {
+		return JiraIngestStats{}, err
 	}
 
 	rows := make([]store.ChunkRow, 0, len(chunks))
 	if len(chunks) > 0 {
-		// Batch embed to respect EMBED_BATCH_SIZE.
 		texts := make([]string, len(chunks))
 		for i, c := range chunks {
 			texts[i] = c.Content
 		}
 		vectors, err := embedInBatches(ctx, deps.Embedder, texts, opts.BatchSize)
 		if err != nil {
-			return issueStats{}, fmt.Errorf("embed %s: %w", iss.Key, err)
+			return JiraIngestStats{}, fmt.Errorf("embed %s: %w", norm.Key, err)
 		}
 		for i, c := range chunks {
 			rows = append(rows, store.ChunkRow{
@@ -302,16 +331,16 @@ func processIssue(ctx context.Context, deps JiraDeps, opts JiraOptions, iss jira
 		UpdatedAt:      norm.UpdatedAt,
 	})
 	if err != nil {
-		return issueStats{}, err
+		return JiraIngestStats{}, err
 	}
 	if err := deps.Store.ReplaceChunks(ctx, sourceID, rows); err != nil {
-		return issueStats{}, err
+		return JiraIngestStats{}, err
 	}
 
-	return issueStats{
-		chunks:     len(rows),
-		embeddings: len(rows),
-		updatedAt:  norm.UpdatedAt,
+	return JiraIngestStats{
+		Chunks:     len(rows),
+		Embeddings: len(rows),
+		UpdatedAt:  norm.UpdatedAt,
 	}, nil
 }
 
@@ -339,6 +368,12 @@ func embedInBatches(ctx context.Context, e embed.Embedder, texts []string, batch
 
 // buildJQL composes the incremental-sync query. Always orders by updated ASC
 // so we can checkpoint the watermark safely.
+//
+// Atlassian Cloud rejects "unbounded" JQL ("Unbounded JQL queries are not
+// allowed here. Please add a search restriction to your query."), so when
+// the caller has neither a project allow-list nor a real watermark we
+// supply a no-op date floor at the Unix epoch. JQL accepts dates as far
+// back as 1970 and this guarantees at least one restriction is present.
 func buildJQL(projects []string, watermark time.Time) string {
 	var parts []string
 	if len(projects) > 0 {
@@ -355,7 +390,9 @@ func buildJQL(projects []string, watermark time.Time) string {
 		parts = append(parts, fmt.Sprintf(`updated >= "%s"`, t.Format("2006-01-02 15:04")))
 	}
 	if len(parts) == 0 {
-		return "order by updated ASC"
+		// Epoch floor — every issue qualifies, but the JQL is "bounded"
+		// in Atlassian's sense.
+		parts = append(parts, `updated >= "1970-01-01 00:00"`)
 	}
 	return strings.Join(parts, " AND ") + " order by updated ASC"
 }

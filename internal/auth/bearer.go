@@ -79,6 +79,39 @@ func BearerMiddleware(s *store.Store, logger *slog.Logger) func(http.Handler) ht
 	}
 }
 
+// MiddlewareBearerOrCookie accepts either a valid bearer token or a
+// session cookie (OIDC or stub). Bearer wins when the Authorization
+// header is set — backend-to-backend callers (proposalWriter, scripts)
+// don't carry cookies, and a cookie-bearing browser request never sets
+// Authorization.
+//
+// On successful bearer auth a synthetic User{Email: "bearer:<name>"} is
+// attached so downstream handlers that read auth.UserFromContext (the
+// rate limiter, search logging) keep working without a separate code
+// path. The bucket-per-token-name is a feature: different callers get
+// their own rate-limit windows.
+func MiddlewareBearerOrCookie(s *store.Store, logger *slog.Logger, cookieMW func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	bearer := BearerMiddleware(s, logger)
+	return func(next http.Handler) http.Handler {
+		bearerWrapped := bearer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if p, ok := PrincipalFromContext(r.Context()); ok {
+				ctx := WithUser(r.Context(), User{Email: "bearer:" + p.TokenName})
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+			next.ServeHTTP(w, r)
+		}))
+		cookieWrapped := cookieMW(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "" {
+				bearerWrapped.ServeHTTP(w, r)
+				return
+			}
+			cookieWrapped.ServeHTTP(w, r)
+		})
+	}
+}
+
 // extractBearer returns the raw token or "" when absent/malformed. Case-
 // insensitive on the scheme; rejects multi-value headers.
 func extractBearer(h string) string {

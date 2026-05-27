@@ -12,20 +12,23 @@ import (
 	"github.com/treetop/rag-svc/internal/auth"
 	"github.com/treetop/rag-svc/internal/blob"
 	"github.com/treetop/rag-svc/internal/config"
+	"github.com/treetop/rag-svc/internal/ingest"
 	"github.com/treetop/rag-svc/internal/retrieve"
 	"github.com/treetop/rag-svc/internal/store"
 )
 
 type Server struct {
-	cfg       *config.Config
-	store     *store.Store
-	redis     redis.UniversalClient
-	logger    *slog.Logger
-	retrieval *retrieve.Deps
-	blob      blob.Client
-	web       WebMounter
-	oidc      *auth.OIDC
-	mcp       http.Handler
+	cfg        *config.Config
+	store      *store.Store
+	redis      redis.UniversalClient
+	logger     *slog.Logger
+	retrieval  *retrieve.Deps
+	blob       blob.Client
+	web        WebMounter
+	oidc       *auth.OIDC
+	mcp        http.Handler
+	ingest     *ingest.JiraDeps
+	ingestOpts ingest.JiraOptions
 }
 
 // WebMounter lets the top-level server register the web package's routes
@@ -78,6 +81,16 @@ func (s *Server) WithMCP(h http.Handler) *Server {
 	return s
 }
 
+// WithIngest installs the ingest pipeline collaborators used by
+// POST /ingest/jira. Optional — when unset, the endpoint returns 503.
+// The Client field on JiraDeps may be nil; the ingest endpoint never
+// calls Atlassian, only the chunk → embed → upsert tail.
+func (s *Server) WithIngest(deps ingest.JiraDeps, opts ingest.JiraOptions) *Server {
+	s.ingest = &deps
+	s.ingestOpts = opts
+	return s
+}
+
 // Handler returns the HTTP mux for the server. Kept separate from Run so
 // tests can exercise handlers directly.
 //
@@ -100,20 +113,29 @@ func (s *Server) Handler() http.Handler {
 	cors := CORSMiddleware(CORSOptions{
 		AllowedOrigins: BuildCORSOrigins(s.cfg.Auth.ExtensionID, s.cfg.Auth.WebUIOrigin),
 	})
-	var authMW func(http.Handler) http.Handler
+	var cookieMW func(http.Handler) http.Handler
 	if s.oidc != nil {
-		authMW = auth.MiddlewareWithOIDC(s.oidc, s.cfg.Auth.OIDCSessionCookie)
+		cookieMW = auth.MiddlewareWithOIDC(s.oidc, s.cfg.Auth.OIDCSessionCookie)
 	} else {
-		authMW = auth.Middleware(auth.Options{
+		cookieMW = auth.Middleware(auth.Options{
 			CookieName: s.cfg.Auth.OIDCSessionCookie,
 			StubMode:   true,
 		})
 	}
+	// /search, /projects, /spaces, /upload accept either a session cookie
+	// (browser/extension via OIDC or stub) or a bearer token (backend
+	// callers like proposalWriter). MCP and /ingest/jira stay bearer-only.
+	authMW := auth.MiddlewareBearerOrCookie(s.store, s.logger, cookieMW)
+	// The web package still wants pure cookie auth — bearer makes no sense
+	// for the chat UI's HTML routes.
+	webAuthMW := cookieMW
 	rl := RateLimitMiddleware(RateLimitOptions{
 		PerUserLimit: s.cfg.Search.RateLimitPerUser,
-		KeyPrefix:    "rl:search",
-		Redis:        s.redis,
-		Logger:       s.logger,
+		// Per-instance prefix (e.g. "rag-treetop:") prevents cross-deploy
+		// rate-limit interference when multiple rag-svc share one Valkey.
+		KeyPrefix: s.cfg.Core.RedisKeyPrefix + "rl:search",
+		Redis:     s.redis,
+		Logger:    s.logger,
 	})
 
 	// Middleware composes outermost to innermost: CORS writes its headers
@@ -122,12 +144,14 @@ func (s *Server) Handler() http.Handler {
 	// window, then the inner mux dispatches by method.
 	authedMux := http.NewServeMux()
 	authedMux.HandleFunc("GET /search", s.handleSearch)
+	authedMux.HandleFunc("GET /sources", s.handleGetSource)
 	authedMux.HandleFunc("GET /projects", s.handleProjects)
 	authedMux.HandleFunc("GET /spaces", s.handleSpaces)
 	authedMux.HandleFunc("POST /upload", s.handleUpload)
 
 	stack := cors(authMW(rl(authedMux)))
 	mux.Handle("/search", stack)
+	mux.Handle("/sources", stack)
 	mux.Handle("/projects", stack)
 	mux.Handle("/spaces", stack)
 	mux.Handle("/upload", stack)
@@ -136,13 +160,25 @@ func (s *Server) Handler() http.Handler {
 	// with the same auth middleware but NO CORS/rate-limit — those are
 	// API concerns.
 	if s.web != nil {
-		s.web.Mount(mux, authMW)
+		s.web.Mount(mux, webAuthMW)
 	}
 
 	// MCP: static bearer tokens, no OIDC, no CORS. Already wrapped by
 	// BearerMiddleware in WithMCP.
 	if s.mcp != nil {
 		mux.Handle("POST /mcp", s.mcp)
+	}
+
+	// /ingest/jira and /ingest/document: bearer-authed feeder endpoints
+	// for out-of-band content (reconstructed Jira tickets, project
+	// summaries). Same middleware stack as /mcp — backend-to-backend only,
+	// no CORS. Both gate on s.ingest (the Jira deps are reused for the
+	// embedder + store + logger; the document path doesn't need
+	// JiraDeps.Client).
+	if s.ingest != nil {
+		bearer := auth.BearerMiddleware(s.store, s.logger)
+		mux.Handle("POST /ingest/jira", bearer(http.HandlerFunc(s.handleIngestJira)))
+		mux.Handle("POST /ingest/document", bearer(http.HandlerFunc(s.handleIngestDocument)))
 	}
 
 	return mux

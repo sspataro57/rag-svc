@@ -55,6 +55,10 @@ services:
       DATABASE_URL: postgres://ragsvc:ragsvc@postgres:5432/ragsvc?sslmode=disable
       REDIS_MODE: standalone
       REDIS_URL: redis://redis:6379/0
+      # Optional global Redis key prefix. Empty by default for compose;
+      # k8s overlays set "rag-treetop:" / "rag-tes:" / "rag-personal:"
+      # so multiple instances can share one Valkey safely.
+      REDIS_KEY_PREFIX: "${REDIS_KEY_PREFIX:-}"
       BLOB_ENDPOINT: http://minio:9000
       BLOB_BUCKET: rag-svc
       BLOB_ACCESS_KEY: minioadmin

@@ -125,6 +125,65 @@ func TestJira_VeryLongCommentIsSplit(t *testing.T) {
 	}
 }
 
+func TestJira_CommentHeaderVariants(t *testing.T) {
+	// Reconstructed tickets carry partial metadata. Verify each header
+	// branch — never emit "by " or "on 0001-01-01" filler.
+	cases := []struct {
+		name    string
+		comment jira.NormalizedComment
+		wantSub []string
+		denySub []string
+	}{
+		{
+			name:    "both",
+			comment: jira.NormalizedComment{Author: "Alice", CreatedAt: time.Date(2026, 1, 16, 0, 0, 0, 0, time.UTC), Body: "x"},
+			wantSub: []string{"## Comment by Alice on 2026-01-16"},
+			denySub: []string{"0001-01-01"},
+		},
+		{
+			name:    "author-only",
+			comment: jira.NormalizedComment{Author: "Salvador Spataro", Body: "x"},
+			wantSub: []string{"## Comment by Salvador Spataro\n"},
+			denySub: []string{"0001-01-01", " on "},
+		},
+		{
+			name:    "date-only",
+			comment: jira.NormalizedComment{CreatedAt: time.Date(2019, 8, 17, 0, 0, 0, 0, time.UTC), Body: "x"},
+			wantSub: []string{"## Comment on 2019-08-17"},
+			denySub: []string{"by "},
+		},
+		{
+			name:    "neither",
+			comment: jira.NormalizedComment{Body: "x"},
+			wantSub: []string{"## Comment\n"},
+			denySub: []string{"by ", " on ", "0001-01-01"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			chunks, err := Jira(&jira.NormalizedIssue{
+				Key:      "TES-1",
+				Title:    "T",
+				Comments: []jira.NormalizedComment{tc.comment},
+			}, JiraOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := chunks[0].Content
+			for _, w := range tc.wantSub {
+				if !strings.Contains(body, w) {
+					t.Errorf("missing %q in:\n%s", w, body)
+				}
+			}
+			for _, d := range tc.denySub {
+				if strings.Contains(body, d) {
+					t.Errorf("unexpected %q in:\n%s", d, body)
+				}
+			}
+		})
+	}
+}
+
 func TestTokenCount(t *testing.T) {
 	n, err := TokenCount("hello world")
 	if err != nil {

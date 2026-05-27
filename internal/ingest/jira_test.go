@@ -7,7 +7,8 @@ import (
 
 func TestBuildJQL_AllProjectsNoWatermark(t *testing.T) {
 	got := buildJQL(nil, time.Time{})
-	want := "order by updated ASC"
+	// Atlassian Cloud rejects unbounded JQL; we inject an epoch floor.
+	want := `updated >= "1970-01-01 00:00" order by updated ASC`
 	if got != want {
 		t.Errorf("got %q want %q", got, want)
 	}

@@ -29,11 +29,13 @@ type EmbedCache struct {
 
 // NewEmbedCache builds the cache wrapper. ttl of 0 disables expiration.
 // dim is checked on every Get to guard against cross-model corruption in the
-// event a cached vector slips through.
-func NewEmbedCache(client redis.UniversalClient, ttl time.Duration, dim int) *EmbedCache {
+// event a cached vector slips through. globalPrefix is prepended to the
+// cache's own "emb:v1:" prefix so multiple rag-svc instances can share a
+// Valkey cluster without colliding.
+func NewEmbedCache(client redis.UniversalClient, ttl time.Duration, dim int, globalPrefix string) *EmbedCache {
 	return &EmbedCache{
 		client: client,
-		prefix: "emb:v1:",
+		prefix: globalPrefix + "emb:v1:",
 		ttl:    ttl,
 		dim:    dim,
 	}
