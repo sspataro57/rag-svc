@@ -400,9 +400,15 @@ func requireConfluence(cfg *config.Config) error {
 }
 
 func newIngestJiraCmd() *cobra.Command {
-	return &cobra.Command{
+	var rebuildLinks bool
+	cmd := &cobra.Command{
 		Use:   "jira",
 		Short: "Incrementally sync Jira issues",
+		Long: "By default runs an incremental sync against Jira from the stored " +
+			"watermark. Pass --rebuild-links to instead walk every indexed Jira " +
+			"source, refetch the issue, and rewrite only its source_links rows " +
+			"(no re-chunk, no re-embed) — used after the source_links schema " +
+			"migration to backfill historical edges.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, logger, err := bootstrap()
 			if err != nil {
@@ -427,19 +433,35 @@ func newIngestJiraCmd() *cobra.Command {
 				Token:   cfg.Jira.Token,
 			})
 
-			embedder := buildEmbedder(cfg, logger)
-
-			res, err := ingest.RunJira(ctx, ingest.JiraDeps{
-				Client:   client,
-				Embedder: embedder,
-				Store:    st,
-				Logger:   logger,
-			}, ingest.JiraOptions{
+			deps := ingest.JiraDeps{
+				Client: client,
+				Store:  st,
+				Logger: logger,
+			}
+			opts := ingest.JiraOptions{
 				BaseURL:   cfg.Jira.BaseURL,
 				Projects:  cfg.Jira.Projects,
 				Workers:   cfg.Jira.Workers,
 				BatchSize: cfg.LLM.EmbedBatchSize,
-			})
+			}
+
+			if rebuildLinks {
+				res, err := ingest.RebuildJiraLinks(ctx, deps, opts)
+				if err != nil {
+					return err
+				}
+				logger.Info("rebuild-links finished",
+					"processed", res.SourcesProcessed,
+					"links_written", res.LinksWritten,
+					"skipped", res.Skipped,
+					"failed", res.Failed,
+					"elapsed", res.FinishedAt.Sub(res.StartedAt).String(),
+				)
+				return nil
+			}
+
+			deps.Embedder = buildEmbedder(cfg, logger)
+			res, err := ingest.RunJira(ctx, deps, opts)
 			if err != nil {
 				return err
 			}
@@ -453,6 +475,9 @@ func newIngestJiraCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&rebuildLinks, "rebuild-links", false,
+		"refetch every indexed Jira source and rewrite only its source_links rows; skips chunking/embedding")
+	return cmd
 }
 
 func requireJira(cfg *config.Config) error {

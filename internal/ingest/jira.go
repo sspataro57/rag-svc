@@ -364,6 +364,166 @@ func IngestJiraNormalized(ctx context.Context, deps JiraDeps, opts JiraOptions, 
 	}, nil
 }
 
+// JiraLinksResult summarizes a rebuild-links backfill run.
+type JiraLinksResult struct {
+	SourcesProcessed int
+	LinksWritten     int
+	Skipped          int // 404/403 — issue deleted or no longer accessible
+	Failed           int
+	StartedAt        time.Time
+	FinishedAt       time.Time
+}
+
+// RebuildJiraLinks walks every indexed Jira source, re-fetches the issue
+// from the live API, and rewrites only its source_links rows. Skips
+// chunking and embedding entirely — purpose-built for backfilling the
+// link graph after migration 0004 without re-spending the embeddings
+// budget. Idempotent: ReplaceSourceLinks is delete-then-insert, so
+// re-running just redoes work.
+//
+// Failure model:
+//   - 404/403 on GetIssue → log + skip (issue was deleted or the service
+//     account lost access; leaving stale source row in place is fine,
+//     its links just become empty).
+//   - Other errors → counted as failed; first error is returned to the
+//     caller. Successful work earlier in the run is durable.
+func RebuildJiraLinks(ctx context.Context, deps JiraDeps, opts JiraOptions) (*JiraLinksResult, error) {
+	opts = opts.withDefaults()
+	log := deps.Logger
+	if log == nil {
+		log = slog.Default()
+	}
+
+	const (
+		pageSize     = 500
+		progressEach = 200
+	)
+
+	start := time.Now().UTC()
+	log.Info("rebuild-links: starting", "workers", opts.Workers)
+
+	jobs := make(chan store.SourceKeyRef)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var processed, links, skipped, failed int
+	var firstErr error
+	setErr := func(e error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if firstErr == nil {
+			firstErr = e
+		}
+	}
+
+	for w := 0; w < opts.Workers; w++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for sk := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				iss, err := deps.Client.GetIssue(ctx, sk.Key)
+				if err != nil {
+					if jira.IsNotFound(err) {
+						log.Info("rebuild-links: issue not reachable, skipping", "key", sk.Key)
+						mu.Lock()
+						skipped++
+						mu.Unlock()
+						continue
+					}
+					log.Error("rebuild-links: fetch failed", "key", sk.Key, "err", err)
+					setErr(fmt.Errorf("fetch %s: %w", sk.Key, err))
+					mu.Lock()
+					failed++
+					mu.Unlock()
+					continue
+				}
+				norm, err := jira.Normalize(iss, opts.BaseURL)
+				if err != nil {
+					log.Error("rebuild-links: normalize failed", "key", sk.Key, "err", err)
+					setErr(fmt.Errorf("normalize %s: %w", sk.Key, err))
+					mu.Lock()
+					failed++
+					mu.Unlock()
+					continue
+				}
+				rows := make([]store.LinkRow, 0, len(norm.Links))
+				for _, l := range norm.Links {
+					rows = append(rows, store.LinkRow{
+						TargetSourceType: l.TargetType,
+						TargetSourceKey:  l.TargetKey,
+						Kind:             l.Kind,
+					})
+				}
+				if err := deps.Store.ReplaceSourceLinks(ctx, sk.ID, rows); err != nil {
+					log.Error("rebuild-links: store write failed", "key", sk.Key, "err", err)
+					setErr(fmt.Errorf("replace links %s: %w", sk.Key, err))
+					mu.Lock()
+					failed++
+					mu.Unlock()
+					continue
+				}
+				mu.Lock()
+				processed++
+				links += len(rows)
+				snap := processed
+				mu.Unlock()
+				if snap%progressEach == 0 {
+					log.Info("rebuild-links: progress",
+						"processed", snap,
+						"links_written", links,
+						"skipped", skipped,
+						"failed", failed,
+					)
+				}
+			}
+		}(w)
+	}
+
+	var afterID int64
+	for {
+		batch, err := deps.Store.ListSourceKeysByType(ctx, sourceTypeJira, afterID, pageSize)
+		if err != nil {
+			close(jobs)
+			wg.Wait()
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, sk := range batch {
+			select {
+			case <-ctx.Done():
+				close(jobs)
+				wg.Wait()
+				return nil, ctx.Err()
+			case jobs <- sk:
+			}
+			afterID = sk.ID
+		}
+	}
+	close(jobs)
+	wg.Wait()
+
+	res := &JiraLinksResult{
+		SourcesProcessed: processed,
+		LinksWritten:     links,
+		Skipped:          skipped,
+		Failed:           failed,
+		StartedAt:        start,
+		FinishedAt:       time.Now().UTC(),
+	}
+	log.Info("rebuild-links: done",
+		"processed", res.SourcesProcessed,
+		"links_written", res.LinksWritten,
+		"skipped", res.Skipped,
+		"failed", res.Failed,
+		"elapsed", res.FinishedAt.Sub(res.StartedAt).String(),
+	)
+	return res, firstErr
+}
+
 func embedInBatches(ctx context.Context, e embed.Embedder, texts []string, batchSize int) ([][]float32, error) {
 	if batchSize <= 0 {
 		batchSize = 96

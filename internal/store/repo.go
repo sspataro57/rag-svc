@@ -78,6 +78,48 @@ WHERE source_type = $1 AND source_key = $2`
 	return &out, nil
 }
 
+// SourceKeyRef is the minimal (id, source_key) pair used by maintenance
+// jobs that need to walk every indexed source — notably the rebuild-links
+// backfill. Returned by ListSourceKeysByType.
+type SourceKeyRef struct {
+	ID  int64
+	Key string
+}
+
+// ListSourceKeysByType returns up to `limit` (id, source_key) pairs for
+// sources of the given type, ordered by id ascending and starting strictly
+// after afterID. Pass afterID=0 for the first page. Returns an empty slice
+// when no rows remain.
+//
+// Used by the rebuild-links backfill to walk the entire corpus in
+// keyset-paginated batches without holding a long-running cursor.
+func (s *Store) ListSourceKeysByType(ctx context.Context, sourceType string, afterID int64, limit int) ([]SourceKeyRef, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	const q = `
+SELECT id, source_key
+FROM sources
+WHERE source_type = $1 AND id > $2
+ORDER BY id ASC
+LIMIT $3`
+	rows, err := s.pool.Query(ctx, q, sourceType, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: list source keys: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]SourceKeyRef, 0, limit)
+	for rows.Next() {
+		var r SourceKeyRef
+		if err := rows.Scan(&r.ID, &r.Key); err != nil {
+			return nil, fmt.Errorf("store: scan source key: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ChunkRow mirrors public.chunks minus the generated tsvector column.
 type ChunkRow struct {
 	ChunkIndex int

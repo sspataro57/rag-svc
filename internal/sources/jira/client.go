@@ -207,6 +207,19 @@ func (e *apiError) Error() string {
 	return fmt.Sprintf("jira: http %d: %s", e.Status, e.Body)
 }
 
+// IsNotFound reports whether err represents a 404 from the Jira API —
+// e.g. an issue we have indexed has since been deleted in Jira, or the
+// service account lost access to its project. Callers (notably the
+// rebuild-links backfill) treat this as a skippable per-issue condition
+// rather than a fatal run-level error.
+func IsNotFound(err error) bool {
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		return false
+	}
+	return ae.Status == http.StatusNotFound
+}
+
 // IsTokenError reports whether err is a 4xx pagination-token rejection —
 // per CLAUDE.md, the orchestrator should restart from the last watermark
 // instead of retrying with the same token.
