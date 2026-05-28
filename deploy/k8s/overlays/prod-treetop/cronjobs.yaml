@@ -23,7 +23,7 @@ spec:
               emptyDir: {}
           containers:
             - name: ingest-jira
-              image: 192.168.50.20:5000/rag-svc:0.1.3
+              image: 192.168.50.20:5000/rag-svc:0.1.4
               imagePullPolicy: IfNotPresent
               command: ["rag-svc", "ingest", "jira"]
               envFrom:
@@ -69,7 +69,7 @@ spec:
               emptyDir: {}
           containers:
             - name: ingest-confluence
-              image: 192.168.50.20:5000/rag-svc:0.1.3
+              image: 192.168.50.20:5000/rag-svc:0.1.4
               imagePullPolicy: IfNotPresent
               command: ["rag-svc", "ingest", "confluence"]
               envFrom:
