@@ -22,7 +22,7 @@ data:
   EMBED_BATCH_SIZE: "96"
   # Chat completions hit the homelab LAN endpoint — codex models, free.
   ANSWER_BASE_URL: "http://192.168.50.48/v1"
-  ANSWER_MODEL: "gpt-5.4"
+  ANSWER_MODEL: "gpt-5.6-sol"
 
   # ---- search tuning (CLAUDE.md defaults) ----
   SEARCH_VECTOR_WEIGHT: "0.6"
