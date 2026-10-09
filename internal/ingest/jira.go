@@ -89,7 +89,7 @@ func RunJira(ctx context.Context, deps JiraDeps, opts JiraOptions) (*JiraResult,
 	if err != nil {
 		return nil, err
 	}
-	jql := buildJQL(opts.Projects, watermark)
+	jql := buildJQL(opts.Projects, watermark, start)
 	log.Info("jira ingest: starting",
 		"watermark", watermark.Format(time.RFC3339),
 		"jql", jql,
@@ -140,13 +140,12 @@ func RunJira(ctx context.Context, deps JiraDeps, opts JiraOptions) (*JiraResult,
 	}
 
 	if len(issues) == 0 {
-		// Do NOT advance the watermark on a zero-result run. Atlassian's
-		// /search/jql endpoint occasionally returns empty pages for
-		// recent updates; advancing here would silently skip past those
-		// updates forever (see incident 2026-05: 19-day gap between
-		// last indexed_at and the watermark). Leaving the watermark in
-		// place means the next run re-scans the same window, which is
-		// idempotent and self-healing once the API returns real data.
+		// Do NOT advance the watermark on a zero-result run. Leaving it
+		// in place means the next run re-scans the same window, which is
+		// idempotent. (The 2026-05 incident, a 19-day gap between last
+		// indexed_at and the watermark, was blamed on /search/jql
+		// returning empty pages; the real cause was the timezone bug
+		// described on buildJQL.)
 		result.FinishedAt = time.Now().UTC()
 		if !watermark.IsZero() && start.Sub(watermark) > 6*time.Hour {
 			log.Warn("jira ingest: no new issues but watermark is stale",
@@ -549,12 +548,19 @@ func embedInBatches(ctx context.Context, e embed.Embedder, texts []string, batch
 // buildJQL composes the incremental-sync query. Always orders by updated ASC
 // so we can checkpoint the watermark safely.
 //
+// The watermark bound is a relative offset in minutes from now
+// (`updated >= -358m`), not an absolute date-time. JQL reads a bare
+// "yyyy-MM-dd HH:mm" in the querying account's profile timezone, so a UTC
+// timestamp sent to an account in America/Los_Angeles put the floor 7-8
+// hours too late and every update inside that window was never fetched.
+// A relative offset has no timezone.
+//
 // Atlassian Cloud rejects "unbounded" JQL ("Unbounded JQL queries are not
 // allowed here. Please add a search restriction to your query."), so when
 // the caller has neither a project allow-list nor a real watermark we
 // supply a no-op date floor at the Unix epoch. JQL accepts dates as far
 // back as 1970 and this guarantees at least one restriction is present.
-func buildJQL(projects []string, watermark time.Time) string {
+func buildJQL(projects []string, watermark, now time.Time) string {
 	var parts []string
 	if len(projects) > 0 {
 		quoted := make([]string, len(projects))
@@ -564,10 +570,14 @@ func buildJQL(projects []string, watermark time.Time) string {
 		parts = append(parts, fmt.Sprintf("project in (%s)", strings.Join(quoted, ",")))
 	}
 	if !watermark.IsZero() {
-		t := watermark.Add(-watermarkSlack).UTC()
-		// JQL wants minute precision; Atlassian rejects seconds in this
-		// position.
-		parts = append(parts, fmt.Sprintf(`updated >= "%s"`, t.Format("2006-01-02 15:04")))
+		// Round up so the floor never lands after watermark - slack; a
+		// watermark at or ahead of now still looks back one minute.
+		age := now.Sub(watermark.Add(-watermarkSlack))
+		minutes := int64((age + time.Minute - 1) / time.Minute)
+		if minutes < 1 {
+			minutes = 1
+		}
+		parts = append(parts, fmt.Sprintf("updated >= -%dm", minutes))
 	}
 	if len(parts) == 0 {
 		// Epoch floor — every issue qualifies, but the JQL is "bounded"

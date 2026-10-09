@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuildJQL_AllProjectsNoWatermark(t *testing.T) {
-	got := buildJQL(nil, time.Time{})
+	got := buildJQL(nil, time.Time{}, time.Now())
 	// Atlassian Cloud rejects unbounded JQL; we inject an epoch floor.
 	want := `updated >= "1970-01-01 00:00" order by updated ASC`
 	if got != want {
@@ -16,18 +16,36 @@ func TestBuildJQL_AllProjectsNoWatermark(t *testing.T) {
 
 func TestBuildJQL_WithProjectsAndWatermark(t *testing.T) {
 	w := time.Date(2026, 4, 20, 10, 30, 0, 0, time.UTC)
-	got := buildJQL([]string{"PLAT", "OPS"}, w)
-	// Watermark is shifted back by the slack; allow some flexibility on
-	// exact minutes by checking substring shape.
-	wantSubs := []string{
-		`project in ("PLAT","OPS")`,
-		`updated >= "2026-04-20 10:29"`,
-		`order by updated ASC`,
+	now := w.Add(2 * time.Hour)
+	got := buildJQL([]string{"PLAT", "OPS"}, w, now)
+	// 120 minutes since the watermark plus the one-minute slack.
+	want := `project in ("PLAT","OPS") AND updated >= -121m order by updated ASC`
+	if got != want {
+		t.Errorf("got %q want %q", got, want)
 	}
-	for _, s := range wantSubs {
-		if !contains(got, s) {
-			t.Errorf("buildJQL missing %q in %q", s, got)
-		}
+}
+
+// The bound must be a relative offset: an absolute date-time is read in the
+// Jira account's timezone, which is how updates were skipped before.
+func TestBuildJQL_WatermarkBoundIsTimezoneFree(t *testing.T) {
+	now := time.Date(2026, 10, 9, 19, 12, 30, 0, time.UTC)
+	cases := []struct {
+		name      string
+		watermark time.Time
+		want      string
+	}{
+		{"same instant in another zone", time.Date(2026, 10, 9, 6, 14, 0, 0, time.FixedZone("PDT", -7*3600)), "updated >= -360m"},
+		{"partial minute rounds up", time.Date(2026, 10, 9, 13, 14, 38, 0, time.UTC), "updated >= -359m"},
+		{"backfill months back", time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), "updated >= -232994m"},
+		{"watermark ahead of now", now.Add(10 * time.Minute), "updated >= -1m"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildJQL(nil, tc.watermark, now)
+			if want := tc.want + " order by updated ASC"; got != want {
+				t.Errorf("got %q want %q", got, want)
+			}
+		})
 	}
 }
 
