@@ -217,6 +217,61 @@ func TestSearch_TicketKeyShortcutPrependsExactMatch(t *testing.T) {
 	}
 }
 
+func TestSearch_TicketKeysInsideSentence(t *testing.T) {
+	ctx := context.Background()
+	env.truncate(ctx, t)
+
+	env.loadFixture(ctx, t, fixtureSource{
+		sourceType: "jira", sourceKey: "WEB-10500",
+		projectOrSpace: "WEB",
+		title:          "Checkout page times out",
+		url:            "https://x.jira.com/browse/WEB-10500",
+		updatedAt:      time.Now().Add(-24 * time.Hour),
+		chunks:         []fixtureChunk{{content: "The checkout page times out under load.", kind: "body"}},
+	})
+	env.loadFixture(ctx, t, fixtureSource{
+		sourceType: "jira", sourceKey: "API-4491",
+		projectOrSpace: "API",
+		title:          "Rate limiter rejects valid tokens",
+		url:            "https://x.jira.com/browse/API-4491",
+		updatedAt:      time.Now().Add(-48 * time.Hour),
+		chunks:         []fixtureChunk{{content: "Valid tokens are rejected after a deploy.", kind: "body"}},
+	})
+	// Shares the "WEB" prefix: the kind of hit that used to win instead.
+	env.loadFixture(ctx, t, fixtureSource{
+		sourceType: "jira", sourceKey: "WEB-928",
+		projectOrSpace: "WEB",
+		title:          "WEB status page",
+		url:            "https://x.jira.com/browse/WEB-928",
+		updatedAt:      time.Now(),
+		chunks:         []fixtureChunk{{content: "WEB current status and what it is about.", kind: "body"}},
+	})
+
+	hits, err := SearchHits(ctx, Deps{
+		Pool:     env.pool,
+		Embedder: embed.NewFake(embed.Dim),
+	}, Query{Text: "Does API-4491 block WEB-10500, and what is the current status of WEB-10500? Not NOPE-1."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) < 2 {
+		t.Fatalf("expected both named issues, got %d hits", len(hits))
+	}
+	// Named issues lead in the order they appear; the unknown key adds nothing.
+	if hits[0].ID != "jira:API-4491" || hits[1].ID != "jira:WEB-10500" {
+		t.Errorf("expected API-4491 then WEB-10500 first, got %q, %q", hits[0].ID, hits[1].ID)
+	}
+	seen := map[string]int{}
+	for _, h := range hits {
+		seen[h.ID]++
+	}
+	for id, n := range seen {
+		if n > 1 {
+			t.Errorf("duplicate hit %q (%d times)", id, n)
+		}
+	}
+}
+
 func TestSearch_HybridReturnsVectorMatches(t *testing.T) {
 	ctx := context.Background()
 	env.truncate(ctx, t)

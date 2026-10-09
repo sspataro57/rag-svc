@@ -55,11 +55,14 @@ func SearchHits(ctx context.Context, d Deps, q Query) ([]Hit, error) {
 	out := make([]Hit, 0, q.Limit+1)
 	seen := make(map[string]struct{}, q.Limit+1)
 
-	// 1. Ticket-key shortcut. If the entire query text is a Jira key, the
-	//    matching issue is prepended with score=1.0, then hybrid results
-	//    fill the rest.
-	if key := ParseTicketKey(q.Text); key != "" {
-		hit, ok, err := fetchJiraByKey(ctx, d.Pool, key)
+	// 1. Ticket-key shortcut. Every Jira key named in the query text, bare
+	//    or inside a sentence, has its issue prepended with score=1.0;
+	//    hybrid results fill the rest.
+	for _, key := range ExtractTicketKeys(q.Text) {
+		if len(out) >= q.Limit {
+			break
+		}
+		hit, ok, err := fetchJiraByKey(ctx, d.Pool, key, q.Text)
 		if err != nil {
 			return nil, err
 		}

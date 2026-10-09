@@ -6,30 +6,44 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// ticketKeyRE matches a Jira-style issue key: PROJECT-NUMBER where PROJECT
-// starts with a letter and may contain letters/digits/underscores. The
-// pattern matches the entire input — callers should TrimSpace first.
-var ticketKeyRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]+-\d+$`)
+// ticketKeyRE matches a Jira-style issue key anywhere in the text:
+// PROJECT-NUMBER where PROJECT starts with a letter and may contain
+// letters/digits/underscores. Keys are uppercase only, so ordinary words
+// like "step-2" don't trigger lookups; something like "UTF-8" does, and
+// simply finds no row.
+var ticketKeyRE = regexp.MustCompile(`\b[A-Z][A-Z0-9_]+-\d+\b`)
 
-// ParseTicketKey returns the normalized ticket key if text is exactly a Jira
-// key, else "".
-func ParseTicketKey(text string) string {
-	key := strings.TrimSpace(text)
-	if !ticketKeyRE.MatchString(key) {
-		return ""
+// maxTicketKeys caps how many keys from one query get a direct lookup.
+const maxTicketKeys = 5
+
+// ExtractTicketKeys returns the distinct Jira keys named in text, in order
+// of first appearance, capped at maxTicketKeys. A bare key ("PLAT-482") and
+// a key inside a sentence ("what is PLAT-482 about?") both count.
+func ExtractTicketKeys(text string) []string {
+	var keys []string
+	for _, k := range ticketKeyRE.FindAllString(text, -1) {
+		if slices.Contains(keys, k) {
+			continue
+		}
+		keys = append(keys, k)
+		if len(keys) == maxTicketKeys {
+			break
+		}
 	}
-	return key
+	return keys
 }
 
 // fetchJiraByKey runs the ticket-key shortcut described in CLAUDE.md: direct
-// source lookup by (source_type, source_key) when the query text is a bare
-// ticket key. Returns (hit, true) when found, (_, false) when not.
-func fetchJiraByKey(ctx context.Context, q queryer, key string) (Hit, bool, error) {
+// source lookup by (source_type, source_key) for a key named in the query.
+// queryText drives the snippet, so a question about the issue highlights
+// the relevant part of its body. Returns (hit, true) when found, (_, false)
+// when not.
+func fetchJiraByKey(ctx context.Context, q queryer, key, queryText string) (Hit, bool, error) {
 	const sql = `
 SELECT source_type, source_key, project_or_space, title, url, extra, updated_at,
        ts_headline('english',
@@ -39,7 +53,7 @@ SELECT source_type, source_key, project_or_space, title, url, extra, updated_at,
 FROM sources
 WHERE source_type = 'jira' AND source_key = $1
 LIMIT 1`
-	row := q.QueryRow(ctx, sql, key, key)
+	row := q.QueryRow(ctx, sql, key, queryText)
 	var (
 		sourceType, sourceKey, title, url, snippet string
 		projectOrSpace                             *string

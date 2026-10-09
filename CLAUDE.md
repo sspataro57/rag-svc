@@ -435,7 +435,7 @@ func SearchHits(ctx context.Context, q Query) ([]Hit, error)
 
 ### Ranking (`rank.go`)
 
-1. **Ticket-key shortcut.** If `q.Text` matches `^[A-Z][A-Z0-9_]+-\d+$`, `SELECT ... WHERE source_type='jira' AND source_key=?`. Return as `score=1.0` if found, then append the hybrid results below it.
+1. **Ticket-key shortcut.** For each Jira key in `q.Text` (`\b[A-Z][A-Z0-9_]+-\d+\b`, bare or inside a sentence, first 5 distinct), `SELECT ... WHERE source_type='jira' AND source_key=?`. Return each as `score=1.0` if found, then append the hybrid results below them.
 2. **Vector branch.** Embed the query (Redis-cached by `md5(text)`, TTL `SEARCH_QUERY_CACHE_TTL`). Query `chunks` with `ORDER BY embedding <=> $1 LIMIT 50`. Cosine distance → similarity via `1 - distance`, normalized to `[0, 1]`.
 3. **FTS branch.** `SELECT ..., ts_rank_cd(tsv, plainto_tsquery('english', $1)) AS score FROM chunks WHERE tsv @@ plainto_tsquery('english', $1) ORDER BY score DESC LIMIT 50`. Normalize by dividing by max in the result set.
 4. **Fusion.** Outer-join on `chunk_id`; score = `VECTOR_WEIGHT * vector + FTS_WEIGHT * fts` (missing side = 0).

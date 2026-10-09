@@ -41,7 +41,7 @@ type searchHit struct {
 type searchMeta struct {
 	Limit       int    `json:"limit"`
 	ElapsedMS   int64  `json:"elapsed_ms"`
-	TicketShort string `json:"ticket_shortcut,omitempty"` // key if the ticket-key shortcut fired
+	TicketShort string `json:"ticket_shortcut,omitempty"` // key(s), comma-separated, if the ticket-key shortcut fired
 }
 
 type errorResponse struct {
@@ -127,7 +127,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Meta: searchMeta{
 			Limit:       limit,
 			ElapsedMS:   elapsed.Milliseconds(),
-			TicketShort: retrieve.ParseTicketKey(q),
+			TicketShort: strings.Join(retrieve.ExtractTicketKeys(q), ","),
 		},
 	}
 	for _, h := range hits {
