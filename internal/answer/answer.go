@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/treetop/rag-svc/internal/retrieve"
 	"github.com/treetop/rag-svc/internal/store"
@@ -115,8 +116,18 @@ Rules:
 3. Keep answers focused. Don't repeat the question.
 4. Markdown formatting is fine for structure (lists, short code blocks).`
 
+// maxBodyChars caps how much of a directly named issue's body goes into
+// the prompt, so several named issues still fit the context budget.
+const maxBodyChars = 4000
+
 // BuildPrompt assembles the messages we send to the LLM. Exposed for
 // tests so we can assert shape without running a real completion.
+//
+// Each context item is the hit's title, URL, a metadata line (Jira status,
+// type, assignee, last update) and its snippet. A hit that carries Body,
+// i.e. an issue the question names by key, gets the body instead of the
+// snippet; if that doesn't fit the remaining budget it falls back to the
+// snippet.
 func BuildPrompt(query string, hits []retrieve.Hit, maxChars int) []chatMessage {
 	if maxChars <= 0 {
 		maxChars = 12000
@@ -124,7 +135,13 @@ func BuildPrompt(query string, hits []retrieve.Hit, maxChars int) []chatMessage 
 	var ctxB strings.Builder
 	used := 0
 	for i, h := range hits {
-		entry := fmt.Sprintf("[%d] %s — %s\n%s\n\n", i+1, sanitizeTitle(h.Title), h.URL, stripMarks(h.Snippet))
+		head := fmt.Sprintf("[%d] %s — %s\n%s", i+1, sanitizeTitle(h.Title), h.URL, metaLine(h))
+		entry := head + stripMarks(h.Snippet) + "\n\n"
+		if h.Body != "" {
+			if full := head + truncateChars(h.Body, maxBodyChars) + "\n\n"; used+len(full) <= maxChars {
+				entry = full
+			}
+		}
 		if used+len(entry) > maxChars {
 			break
 		}
@@ -136,6 +153,40 @@ func BuildPrompt(query string, hits []retrieve.Hit, maxChars int) []chatMessage 
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: user},
 	}
+}
+
+// metaLine renders the facts a snippet doesn't carry: Jira status, type and
+// assignee from the hit's extra, plus the source's last update. Returns ""
+// (no line) when there is nothing to say.
+func metaLine(h retrieve.Hit) string {
+	var parts []string
+	for _, f := range []struct{ label, key string }{
+		{"Status", "status"},
+		{"Type", "issue_type"},
+		{"Assignee", "assignee"},
+	} {
+		if v, _ := h.Extra[f.key].(string); v != "" {
+			parts = append(parts, f.label+": "+v)
+		}
+	}
+	if !h.UpdatedAt.IsZero() {
+		parts = append(parts, "Updated: "+h.UpdatedAt.UTC().Format("2006-01-02"))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " | ") + "\n"
+}
+
+// truncateChars cuts s to at most n bytes on a rune boundary, marking the cut.
+func truncateChars(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "\n[truncated]"
 }
 
 func sanitizeTitle(t string) string {

@@ -45,7 +45,7 @@ func ExtractTicketKeys(text string) []string {
 // when not.
 func fetchJiraByKey(ctx context.Context, q queryer, key, queryText string) (Hit, bool, error) {
 	const sql = `
-SELECT source_type, source_key, project_or_space, title, url, extra, updated_at,
+SELECT source_type, source_key, project_or_space, title, url, extra, updated_at, body_markdown,
        ts_headline('english',
                    COALESCE(NULLIF(body_markdown, ''), title),
                    plainto_tsquery('english', $2),
@@ -60,7 +60,7 @@ LIMIT 1`
 		extra                                      []byte
 	)
 	var h Hit
-	err := row.Scan(&sourceType, &sourceKey, &projectOrSpace, &title, &url, &extra, &h.UpdatedAt, &snippet)
+	err := row.Scan(&sourceType, &sourceKey, &projectOrSpace, &title, &url, &extra, &h.UpdatedAt, &h.Body, &snippet)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Hit{}, false, nil
 	}

@@ -44,4 +44,9 @@ type Hit struct {
 	UpdatedAt      time.Time      `json:"updated_at"`
 	Score          float64        `json:"score"`
 	Extra          map[string]any `json:"extra,omitempty"`
+
+	// Body is the source's full normalized markdown. Only the ticket-key
+	// shortcut fills it, for issues the query names directly, so the
+	// answer step can read the whole issue. Never serialized to clients.
+	Body string `json:"-"`
 }

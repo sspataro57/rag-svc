@@ -209,6 +209,16 @@ func TestSearch_TicketKeyShortcutPrependsExactMatch(t *testing.T) {
 	if hits[0].Score != 1.0 {
 		t.Errorf("ticket-key hit score: got %v want 1.0", hits[0].Score)
 	}
+	// The named issue carries its full body for the answer step; hybrid
+	// hits don't.
+	if hits[0].Body == "" {
+		t.Errorf("ticket-key hit has no Body")
+	}
+	for _, h := range hits[1:] {
+		if h.Body != "" {
+			t.Errorf("hybrid hit %q unexpectedly has a Body", h.ID)
+		}
+	}
 	// No duplicate of PLAT-1 in the tail.
 	for _, h := range hits[1:] {
 		if h.ID == hits[0].ID {
