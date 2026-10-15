@@ -128,7 +128,7 @@ type pageListResp struct {
 // nextPath is the _links.next URL path from the previous response, or ""
 // to start from the first page.
 func (c *Client) ListPagesInSpace(ctx context.Context, spaceID, nextPath string) (*pageListResp, error) {
-	path := nextPath
+	path := nextPathRelative(nextPath)
 	if path == "" {
 		path = fmt.Sprintf("/api/v2/spaces/%s/pages?limit=100&sort=-modified-date", url.PathEscape(spaceID))
 	}
@@ -137,6 +137,18 @@ func (c *Client) ListPagesInSpace(ctx context.Context, spaceID, nextPath string)
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// nextPathRelative makes a _links.next value relative to the client's base
+// URL. Confluence Cloud returns it with the context path included
+// ("/wiki/api/v2/spaces/123/pages?cursor=..."), while the base URL already
+// ends in /wiki, so using it as-is requested /wiki/wiki/... and every space
+// with more than one page of results failed with a 404.
+func nextPathRelative(next string) string {
+	if strings.HasPrefix(next, "/wiki/") {
+		return strings.TrimPrefix(next, "/wiki")
+	}
+	return next
 }
 
 // ---- Single-page fetch (storage-format body) ----
